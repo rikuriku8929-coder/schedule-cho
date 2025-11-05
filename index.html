@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スケジュール帳</title>
+    
+    <style>
+        /* * style.cssの内容
+         */
+        
+        /* 基本設定とダークテーマ */
+        :root {
+            --bg-color: #000;
+            --text-color: #fff;
+            --border-color: #444;
+            --primary-green: #2ecc71;
+            --accent-red: #e74c3c;
+            --day-header-bg: #1a1a1a;
+            --hour-marker: #888;
+            
+            /* イベント色 */
+            --color-red: #E53935;
+            --color-orange: #FB8C00;
+            --color-yellow: #FDD835;
+            --color-green: #43A047;
+            --color-cyan: #00ACC1;
+            --color-blue: #1E88E5;
+
+            /* 削除ボタン用の色 (重複定義を避けるため、1箇所にまとめる) */
+            --delete-button-bg-color: #e74c3c; /* 赤系 */
+            --delete-button-bg-color-hover: #c0392b; /* 少し濃い赤 */
+            --white: #fff; /* delete-event-btn で使われているため */
+            --accent-color: #e74c3c; /* delete-modal .close-modal で使われているため */
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100%;
+        }
+
+        #app-container {
+            max-width: 600px; /* スマートフォン幅を想定 */
+            margin: 0 auto;
+            height: 100dvh; /* 画面の高さに合わせる */
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-color);
+            overflow: hidden; /* 全体のスクロールを禁止 */
+        }
+
+        /* ビューの切り替え */
+        .view {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+            width: 100%;
+        }
+        .view.active {
+            display: flex;
+        }
+
+        /* ヘッダー共通 */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background-color: var(--day-header-bg);
+        }
+        header h2 {
+            margin: 0;
+            font-size: 1.2rem;
+        }
+        .nav-arrow, .nav-add {
+            background: none;
+            border: none;
+            color: var(--text-color);
+            cursor: pointer;
+            padding: 5px;
+        }
+        .nav-arrow .material-icons-sharp,
+        .nav-add .material-icons-sharp {
+            font-size: 28px;
+        }
+
+        /* --- 月表示 (ホーム) --- */
+        .calendar-header {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            text-align: center;
+            padding: 10px 5px;
+            font-size: 0.8rem;
+            color: var(--hour-marker);
+        }
+        .calendar-header div:nth-child(7) { color: var(--accent-red); } /* 日曜 */
+        .calendar-header div:nth-child(6) { color: #aaa; } /* 土曜 */
+
+
+        #calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            flex-grow: 1; /* 残りの高さをすべて使う */
+            border-top: 1px solid var(--border-color);
+            border-left: 1px solid var(--border-color);
+            overflow-y: auto; /* カレンダー部分だけスクロール */
+        }
+
+        .calendar-day {
+            border-right: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+            padding: 4px;
+            min-height: 100px; /* 日付セルの最小高 */
+            font-size: 0.9rem;
+            cursor: pointer;
+            position: relative; /* イベント配置のため */
+            overflow: hidden; /* イベントがはみ出ないように */
+        }
+        .calendar-day.other-month {
+            color: #555;
+            background-color: #0a0a0a;
+        }
+        .calendar-day.today .day-number {
+            background-color: var(--primary-green);
+            color: var(--bg-color);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-block;
+            text-align: center;
+            line-height: 24px;
+        }
+        .calendar-day .day-number.saturday { color: #9ecfff; }
+        .calendar-day .day-number.sunday { color: #ff9e9e; }
+        .calendar-day.other-month .day-number.saturday,
+        .calendar-day.other-month .day-number.sunday {
+            color: #555;
+        }
+
+
+        .event-strip {
+            font-size: 0.75rem;
+            padding: 2px 4px;
+            margin-top: 2px;
+            border-radius: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #000;
+        }
+        /* 月表示のイベント色 */
+        .event-strip[data-color="red"] { background-color: var(--color-red); }
+        .event-strip[data-color="orange"] { background-color: var(--color-orange); }
+        .event-strip[data-color="yellow"] { background-color: var(--color-yellow); }
+        .event-strip[data-color="green"] { background-color: var(--color-green); }
+        .event-strip[data-color="cyan"] { background-color: var(--color-cyan); }
+        .event-strip[data-color="blue"] { background-color: var(--color-blue); }
+
+
+        /* 月表示フッター */
+        #month-view footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            background-color: var(--day-header-bg);
+        }
+        .fab-add, .fab-book {
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .fab-add {
+            background-color: var(--primary-green);
+            color: var(--text-color);
+            width: 56px;
+            height: 56px;
+        }
+        .fab-add .material-icons-sharp {
+            font-size: 30px;
+        }
+        .fab-book {
+            background-color: #6c5ce7; /* 本のマーク用の色 */
+            color: var(--text-color);
+            width: 48px;
+            height: 48px;
+        }
+        .fab-book .material-icons-sharp {
+            font-size: 24px;
+        }
+
+
+        /* --- 日表示 (タイムライン) --- */
+        #day-view header {
+            background-color: var(--bg-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        #timeline-container {
+            flex-grow: 1;
+            overflow-y: auto; /* タイムラインをスクロール */
+            position: relative;
+            padding: 0 10px;
+        }
+
+        .timeline-hours {
+            position: absolute;
+            left: 10px;
+            top: 0;
+            bottom: 0;
+            width: 40px;
+            font-size: 0.8rem;
+            color: var(--hour-marker);
+        }
+        .hour-marker {
+            height: 60px; /* 1時間 = 60px */
+            position: relative;
+            border-top: 1px solid var(--border-color);
+            box-sizing: border-box; /* この行を追加 */
+        }
+        .hour-marker:first-child {
+            border-top: none;
+        }
+        .hour-marker span {
+            position: absolute;
+            top: -0.5em; /* 時間を線の上に配置 */
+            left: 0;
+        }
+
+        .timeline-events {
+            position: absolute;
+            left: 55px; /* 時間マーカーの右側 */
+            right: 10px;
+            top: 0;
+            bottom: 0;
+        }
+
+        .day-event-item {
+            position: absolute;
+            left: 0;
+            right: 0;
+            padding: 8px;
+            border-radius: 5px;
+            overflow: hidden;
+            color: #000;
+            font-size: 0.9rem;
+            box-sizing: border-box; /* paddingを含めて高さを計算 */
+        }
+        .day-event-item h4 {
+            margin: 0 0 4px 0;
+            font-size: 0.9rem;
+        }
+        .day-event-item p {
+            margin: 0;
+            font-size: 0.8rem;
+        }
+        
+        /* .delete-event-btn は .day-event-item .delete-event-btn に変更 */
+
+
+        /* 日表示のイベント色 */
+        .day-event-item[data-color="red"] { background-color: var(--color-red); }
+        .day-event-item[data-color="orange"] { background-color: var(--color-orange); }
+        .day-event-item[data-color="yellow"] { background-color: var(--color-yellow); }
+        .day-event-item[data-color="green"] { background-color: var(--color-green); }
+        .day-event-item[data-color="cyan"] { background-color: var(--color-cyan); }
+        .day-event-item[data-color="blue"] { background-color: var(--color-blue); }
+
+
+        /* --- モーダル (ポップアップ) --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none; /* JSで切り替え */
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #222;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+            position: relative;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .close-modal {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: var(--text-color);
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        /* フォームスタイル */
+        #event-form label, #course-form label {
+            display: block;
+            margin-top: 15px;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            color: var(--hour-marker);
+        }
+        #event-form input[type="text"],
+        #event-form input[type="time"],
+        #event-form input[type="date"],
+        #event-form select,
+        #course-form select {
+            width: 100%;
+            padding: 10px;
+            background-color: #333;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            color: var(--text-color);
+            box-sizing: border-box; /* paddingを幅に含める */
+            font-size: 1rem;
+        }
+        /* Time input は中身の色も変える */
+        input[type="time"], input[type="date"] {
+            color-scheme: dark;
+        }
+
+        .time-inputs {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .time-inputs span {
+            font-size: 1.2rem;
+        }
+
+        .color-picker {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .color-dot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        .color-dot.selected {
+            border-color: var(--text-color);
+            box-shadow: 0 0 5px var(--text-color);
+        }
+
+        #event-form button, #course-form button, #delete-modal button {
+            width: 100%;
+            padding: 12px;
+            background-color: var(--primary-green);
+            border: none;
+            border-radius: 5px;
+            color: var(--text-color);
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        #delete-modal button {
+            background-color: var(--accent-red);
+        }
+        #delete-modal button#delete-event-following {
+            background-color: #b33c2e;
+            margin-top: 10px;
+        }
+
+        /* 予定アイテム内の削除ボタン */
+        .day-event-item .delete-event-btn {
+            position: absolute;
+            top: 5px; /* 上からの位置調整 */
+            right: 5px; /* 右からの位置調整 */
+            background-color: var(--delete-button-bg-color); /* 赤系の色 */
+            color: var(--white);
+            border: none;
+            border-radius: 8px; /* 角丸 */
+            padding: 2px 8px; /* パディングを調整 */
+            font-size: 14px; /* フォントサイズを調整 */
+            cursor: pointer;
+            opacity: 0.8; /* 通常時は少し透過 */
+            transition: opacity 0.2s ease, background-color 0.2s ease;
+            z-index: 10; /* イベントアイテムの上に表示 */
+        }
+
+        /* ❌ボタンのデザインを、削除ボタンと統一 */
+        #delete-modal .close-modal {
+            position: static; /* 絶対配置を解除 */
+            background-color: var(--accent-color); /* 削除ボタンと同じ背景色 */
+            color: white; /* 白い文字 */
+            border-radius: 5px; /* 角を丸く */
+            font-size: 1.1em; /* フォントサイズを削除ボタンに合わせる */
+            padding: 12px 20px; /* パディングを削除ボタンに合わせる */
+            width: 100%; /* 幅いっぱいに */
+            box-sizing: border-box; /* パディングを含めて幅100% */
+            margin-bottom: 15px; /* 下に余白 */
+            display: block; /* ブロック要素にして、margin-bottomが効くように */
+        }
+
+        .day-event-item .delete-event-btn:hover {
+            opacity: 1; /* ホバーで透過なし */
+            background-color: var(--delete-button-bg-color-hover); /* ホバー時の色を少し濃く */
+        }
+
+        /* 履修登録 */
+        #course-list-container {
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .course-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px 0;
+        }
+        .course-item label {
+            margin: 0;
+            color: var(--text-color);
+        }
+
+        /* レスポンシブ対応 (画面が広い場合) */
+        @media (min-width: 601px) {
+            #app-container {
+                max-width: 100%;
+                height: 100vh; /* dvhでなくvh */
+            }
+            .calendar-day {
+                min-height: 120px;
+            }
+        }
+    </style>
+    
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Sharp" rel="stylesheet">
+</head>
+<body>
+
+    <div id="app-container">
+
+        <div id="month-view" class="view active">
+            <header>
+                <button id="prev-month" class="nav-arrow"><span class="material-icons-sharp">arrow_left</span></button>
+                <h2 id="month-year-title"></h2>
+                <button id="next-month" class="nav-arrow"><span class="material-icons-sharp">arrow_right</span></button>
+            </header>
+            <div class="calendar-header">
+                <div>月</div>
+                <div>火</div>
+                <div>水</div>
+                <div>木</div>
+                <div>金</div>
+                <div>土</div>
+                <div>日</div>
+            </div>
+            <div id="calendar-grid"></div>
+            <footer>
+                <button id="add-event-home" class="fab-add"><span class="material-icons-sharp">add</span></button>
+                <button id="open-course-modal" class="fab-book"><span class="material-icons-sharp">book</span></button>
+            </footer>
+        </div>
+
+        <div id="day-view" class="view">
+            <header>
+                <button id="back-to-month" class="nav-arrow"><span class="material-icons-sharp">arrow_left</span></button>
+                <h2 id="day-title"></h2>
+                <button id="add-event-day" class="nav-add"><span class="material-icons-sharp">add</span></button>
+            </header>
+            <div id="timeline-container">
+                </div>
+        </div>
+    </div>
+
+    <div id="event-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" data-modal-id="event-modal">&times;</button>
+            <h3>予定登録</h3>
+            <form id="event-form">
+                <input type="hidden" id="event-id">
+                <input type="hidden" id="event-date-input">
+                
+                <label for="event-name">名前</label>
+                <input type="text" id="event-name" required>
+                
+                <div id="date-picker-group" style="display: none;">
+                    <label for="event-date">日付</label>
+                    <input type="date" id="event-date">
+                </div>
+
+                <label for="event-start-time">時間</label>
+                <div class="time-inputs">
+                    <input type="time" id="event-start-time" required>
+                    <span>〜</span>
+                    <input type="time" id="event-end-time" required>
+                </div>
+
+                <label>色</label>
+                <div class="color-picker">
+                    <span class="color-dot" data-color="red" style="background: #E53935;"></span>
+                    <span class="color-dot" data-color="orange" style="background: #FB8C00;"></span>
+                    <span class="color-dot" data-color="yellow" style="background: #FDD835;"></span>
+                    <span class="color-dot" data-color="green" style="background: #43A047;"></span>
+                    <span class="color-dot" data-color="cyan" style="background: #00ACC1;"></span>
+                    <span class="color-dot" data-color="blue" style="background: #1E88E5;"></span>
+                </div>
+                <input type="hidden" id="event-color" value="cyan"> <label for="event-repeat">繰り返し</label>
+                <select id="event-repeat">
+                    <option value="none">当日のみ</option>
+                    <option value="daily">毎日</option>
+                    <option value="weekly">毎週</option>
+                    <option value="everyOtherDay">隔日</option>
+                    <option value="everyOtherWeek">隔週</option>
+                </select>
+
+                <button type="submit" id="save-event-button">確定</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="course-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" data-modal-id="course-modal">&times;</button>
+            <h3>履修登録</h3>
+            <form id="course-form">
+                <label for="course-grade">学年</label>
+                <select id="course-grade">
+                    <option value="">選択してください</option>
+                </select>
+
+                <label for="course-faculty">学部</label>
+                <select id="course-faculty" disabled>
+                    <option value="">選択してください</option>
+                </select>
+
+                <label for="course-department">学科</label>
+                <select id="course-department" disabled>
+                    <option value="">選択してください</option>
+                </select>
+
+                <div id="course-list-container">
+                    </div>
+
+                <button type="submit" id="save-courses-button">登録</button>
+            </form>
+        </div>
+    </div>
+    
+    <div id="delete-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-modal" data-modal-id="delete-modal">&times;</button>
+            <h3>予定の削除</h3>
+            <input type="hidden" id="delete-event-id">
+            <input type="hidden" id="delete-event-date">
+            <button id="delete-event-single">この予定のみを削除</button>
+            <button id="delete-event-following">これ以降のこの予定を削除</button>
+        </div>
+    </div>
+
+    <script>
+        /*
+         * script.jsの内容
+         */
+        
+        document.addEventListener('DOMContentLoaded', () => {
+
+            // --- グローバル変数・状態管理 ---
+            let currentDate = new Date();
+            let events = JSON.parse(localStorage.getItem('scheduleEvents')) || [];
+            const HOUR_HEIGHT_PX = 60; // 1時間の高さ (CSSと合わせる)
+
+            // ビューのDOM要素
+            const monthView = document.getElementById('month-view');
+            const dayView = document.getElementById('day-view');
+            const appContainer = document.getElementById('app-container');
+
+            // 月表示のDOM要素
+            const monthYearTitle = document.getElementById('month-year-title');
+            const calendarGrid = document.getElementById('calendar-grid');
+            const prevMonthBtn = document.getElementById('prev-month');
+            const nextMonthBtn = document.getElementById('next-month');
+
+            // 日表示のDOM要素
+            const dayTitle = document.getElementById('day-title');
+            const timelineContainer = document.getElementById('timeline-container');
+            const backToMonthBtn = document.getElementById('back-to-month');
+
+            // モーダルDOM要素
+            const eventModal = document.getElementById('event-modal');
+            const courseModal = document.getElementById('course-modal');
+            const deleteModal = document.getElementById('delete-modal');
+            const eventForm = document.getElementById('event-form');
+            const courseForm = document.getElementById('course-form');
+            const colorPicker = document.querySelector('.color-picker');
+            const selectedColorInput = document.getElementById('event-color');
+            
+            // 削除モーダルボタン
+            const deleteEventIdInput = document.getElementById('delete-event-id');
+            const deleteEventDateInput = document.getElementById('delete-event-date');
+            const deleteSingleBtn = document.getElementById('delete-event-single');
+            const deleteFollowingBtn = document.getElementById('delete-event-following');
+
+
+            // --- 授業データ ---
+            const courseData = {
+                '1年生': {
+                    '工学部': {
+                        '機械工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '宇宙半導体工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '機械創生工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '先端材料工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '電気電子工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報通信システム工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '応用科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '創造工学部': {
+                        '建築学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '都市環境工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'デザイン科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '先進工学部': {
+                        '未来ロボティクス学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '生命科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '知能メディア工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '情報変革科学部': {
+                        '情報工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '認知情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '高度応用情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '未来変革科学部': {
+                        'デジタル変革科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '経営デザイン科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '情報科学部': {
+                        '情報工学科(2023以前入学)': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報ネットワーク学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '社会システム科学部': {
+                        '経営情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'プロジェクトマネジメント学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '金融・経営リスク科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    }
+                },
+                '2年生': {
+                    '工学部': { 
+                        '機械工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '機械創生工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '先端材料工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '電気電子工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報通信システム工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '応用科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '創造工学部': { 
+                        '建築学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '都市環境工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'デザイン科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '先進工学部': {
+                        '未来ロボティクス学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '生命科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '知能メディア工学科': [
+                            { name: '情報デザイン基礎', day: '月曜日', start: '09:00', end: '13:00' }, // 9-11, 11-13のコマ？ 結合して 9-13と仮定
+                            { name: 'メディア史', day: '月曜日', start: '14:00', end: '16:00' },
+                            { name: '資格試験英語', day: '月曜日', start: '17:00', end: '19:00' },
+                            { name: '知能メディアプロジェクト２', day: '火曜日', start: '13:00', end: '17:00' },
+                            { name: '資格試験英語', day: '火曜日', start: '17:00', end: '19:00' },
+                            { name: 'デジタルファブリケーション', day: '水曜日', start: '09:00', end: '11:00' },
+                            { name: 'メディア基礎', day: '水曜日', start: '12:00', end: '14:00' },
+                            { name: 'プログラミング言語応用', day: '水曜日', start: '14:00', end: '16:00' },
+                            { name: '資格試験英語', day: '水曜日', start: '17:00', end: '19:00' },
+                            { name: 'メディアデザイン論', day: '木曜日', start: '09:00', end: '11:00' },
+                            { name: '人工知能基礎', day: '木曜日', start: '11:00', end: '13:00' },
+                            { name: '資格試験英語', day: '木曜日', start: '17:00', end: '19:00' },
+                            { name: '統計解析', day: '金曜日', start: '10:00', end: '12:00' },
+                            { name: '総合学際科目', day: '金曜日', start: '13:00', end: '15:00' },
+                            { name: '資格試験英語', day: '金曜日', start: '17:00', end: '19:00' },
+                        ],
+                    },
+                    '情報変革科学部': { 
+                        '情報工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '認知情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '高度応用情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '未来変革科学部': { 
+                        'デジタル変革科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '経営デザイン科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '情報科学部': { 
+                        '情報工学科(2023以前入学)': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報ネットワーク学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '社会システム科学部': { 
+                        '経営情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'プロジェクトマネジメント学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '金融・経営リスク科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    }
+                },
+                '3年生': {
+                    '工学部': {
+                        '機械工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '機械創生工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '先端材料工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '電気電子工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報通信システム工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '応用科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '創造工学部': {
+                        '建築学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '都市環境工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'デザイン科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '先進工学部': {
+                        '未来ロボティクス学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '生命科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '知能メディア工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '情報科学部': {
+                        '情報工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報ネットワーク学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '社会システム科学部': {
+                        '経営情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'プロジェクトマネジメント学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '金融・経営リスク科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    }
+                },
+                '4年生': {
+                    '工学部': {
+                        '機械工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '機械創生工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '先端材料工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '電気電子工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報通信システム工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '応用科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '創造工学部': {
+                        '建築学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '都市環境工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'デザイン科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '先進工学部': {
+                        '未来ロボティクス学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '生命科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '知能メディア工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '情報科学部': {
+                        '情報工学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '情報ネットワーク学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    },
+                    '社会システム科学部': {
+                        '経営情報科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        'プロジェクトマネジメント学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                        '金融・経営リスク科学科': [{ name: 'あ', day: '月曜日', start: '09:00', end: '11:00' }],
+                    }
+                }
+            };
+
+
+            // --- ユーティリティ関数 ---
+
+            /**
+             * events配列をlocalStorageに保存
+             */
+            function saveEvents() {
+                localStorage.setItem('scheduleEvents', JSON.stringify(events));
+            }
+
+            /**
+             * 【修正点】ローカルタイムゾーンに基づいた YYYY-MM-DD 形式の文字列を返す
+             * @param {Date} date
+             */
+            function getISODate(date) {
+                const year = date.getFullYear();
+                const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                const day = date.getDate().toString().padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+
+            /**
+             * 【新規追加】YYYY-MM-DD 形式の文字列をローカルタイムゾーンのDateオブジェクト（時刻 00:00:00）としてパース
+             * @param {string} isoDate
+             */
+            function parseISODate(isoDate) {
+                const [year, month, day] = isoDate.split('-').map(Number);
+                return new Date(year, month - 1, day);
+            }
+
+            /**
+             * 2つの日付が同じ日か判定
+             * @param {Date} d1
+             * @param {Date} d2
+             */
+            function isSameDay(d1, d2) {
+                return d1.getFullYear() === d2.getFullYear() &&
+                       d1.getMonth() === d2.getMonth() &&
+                       d1.getDate() === d2.getDate();
+            }
+            
+            /**
+             * 【修正点】日付の差を日数で返す (タイムゾーンの影響を排除)
+             * @param {Date} d1
+             * @param {Date} d2
+             */
+            function diffDays(d1, d2) {
+                // 時刻部分を切り捨ててUTCで比較
+                const utc1 = Date.UTC(d1.getFullYear(), d1.getMonth(), d1.getDate());
+                const utc2 = Date.UTC(d2.getFullYear(), d2.getMonth(), d2.getDate());
+                return Math.floor((utc1 - utc2) / (1000 * 60 * 60 * 24));
+            }
+
+            /**
+             * 【修正点】特定の日付のイベントを取得 (繰り返しも考慮)
+             * @param {Date} date
+             */
+            function getEventsForDate(date) {
+                const isoDate = getISODate(date);
+                const dayOfWeek = date.getDay(); // 0:日曜, 1:月曜, ..., 6:土曜
+
+                // 比較用の日付 (時刻を0に)
+                const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+                return events.filter(event => {
+                    // 単発イベント
+                    if (event.repeat === 'none' && event.date === isoDate) {
+                        // 削除例外日かチェック
+                        if (event.exceptions && event.exceptions.includes(isoDate)) {
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    // 繰り返しイベント
+                    const startDate = parseISODate(event.startDate); // YYYY-MM-DD -> Date (00:00:00)
+                    const endDate = event.endDate ? parseISODate(event.endDate) : null;
+
+                    // 開始日より前か、終了日より後なら対象外
+                    if (checkDate < startDate || (endDate && checkDate > endDate)) {
+                        return false;
+                    }
+                    // 削除例外日かチェック
+                    if (event.exceptions && event.exceptions.includes(isoDate)) {
+                        return false;
+                    }
+
+                    switch (event.repeat) {
+                        case 'daily':
+                            return true;
+                        case 'weekly':
+                            // 繰り返しの開始日(startDate)の曜日と、チェック対象日(checkDate)の曜日を比較
+                            return startDate.getDay() === dayOfWeek;
+                        case 'everyOtherDay':
+                            // diffDays は日付オブジェクト同士を比較
+                            return diffDays(checkDate, startDate) % 2 === 0;
+                        case 'everyOtherWeek':
+                            const weekDiff = Math.floor(diffDays(checkDate, startDate) / 7);
+                            return startDate.getDay() === dayOfWeek && weekDiff % 2 === 0;
+                        default:
+                            return false;
+                    }
+                }).sort((a, b) => a.startTime.localeCompare(b.startTime)); // 時間順にソート
+            }
+
+
+            // --- ビューレンダリング ---
+
+            /**
+             * 月表示（カレンダー）を描画
+             */
+            function renderMonthView() {
+                calendarGrid.innerHTML = '';
+                const year = currentDate.getFullYear();
+                const month = currentDate.getMonth(); // 0-11
+
+                // 令和年号（簡易的）
+                const reiwaYear = year - 2018;
+                monthYearTitle.textContent = `令和${reiwaYear}年${month + 1}月`;
+
+                const firstDayOfMonth = new Date(year, month, 1);
+                const lastDayOfMonth = new Date(year, month + 1, 0);
+                const daysInMonth = lastDayOfMonth.getDate();
+
+                // 1日の曜日 (0:日曜, 1:月曜... 0を7(月曜始まり)にする)
+                let firstDayOfWeek = firstDayOfMonth.getDay(); 
+                if (firstDayOfWeek === 0) firstDayOfWeek = 7; // 日曜を7に
+
+                // 前月の日付
+                const prevLastDay = new Date(year, month, 0);
+                const prevDays = prevLastDay.getDate();
+
+                // 前月分のセル
+                for (let i = firstDayOfWeek - 2; i >= 0; i--) {
+                    const day = prevDays - i;
+                    const date = new Date(year, month - 1, day);
+                    calendarGrid.appendChild(createDayCell(date, true));
+                }
+
+                // 今月分のセル
+                for (let i = 1; i <= daysInMonth; i++) {
+                    const date = new Date(year, month, i);
+                    calendarGrid.appendChild(createDayCell(date, false));
+                }
+
+                // 来月分のセル
+                const totalCells = calendarGrid.children.length;
+                const nextDays = (totalCells % 7 === 0) ? 0 : 7 - (totalCells % 7);
+                for (let i = 1; i <= nextDays; i++) {
+                    const date = new Date(year, month + 1, i);
+                    calendarGrid.appendChild(createDayCell(date, true));
+                }
+                
+                // ビュー切り替え
+                monthView.classList.add('active');
+                dayView.classList.remove('active');
+            }
+
+            /**
+             * カレンダーの日付セルを作成
+             * @param {Date} date - セルの日付
+             * @param {boolean} isOtherMonth - 他の月かどうか
+             */
+            function createDayCell(date, isOtherMonth) {
+                const dayCell = document.createElement('div');
+                dayCell.className = 'calendar-day';
+                if (isOtherMonth) dayCell.classList.add('other-month');
+                
+                const isoDate = getISODate(date);
+                dayCell.dataset.date = isoDate;
+
+                // 日付番号
+                const dayNumber = document.createElement('span');
+                dayNumber.className = 'day-number';
+                dayNumber.textContent = date.getDate();
+                
+                // 曜日クラス (土日)
+                const dayOfWeek = date.getDay();
+                if (dayOfWeek === 6) dayNumber.classList.add('saturday');
+                if (dayOfWeek === 0) dayNumber.classList.add('sunday');
+
+                // 今日
+                if (isSameDay(date, new Date())) {
+                    dayCell.classList.add('today');
+                }
+
+                dayCell.appendChild(dayNumber);
+
+                // イベントの描画
+                const dayEvents = getEventsForDate(date);
+                dayEvents.forEach(event => {
+                    const eventStrip = document.createElement('div');
+                    eventStrip.className = 'event-strip';
+                    eventStrip.textContent = event.name;
+                    eventStrip.dataset.color = event.color;
+                    eventStrip.title = `${event.name} (${event.startTime}-${event.endTime})`;
+                    dayCell.appendChild(eventStrip);
+                });
+
+                // クリックで日表示へ
+                dayCell.addEventListener('click', () => {
+                    renderDayView(date);
+                });
+
+                return dayCell;
+            }
+
+
+            /**
+             * 日表示（タイムライン）を描画
+             * @param {Date} date
+             */
+            function renderDayView(date) {
+                // 【修正点】dateがローカルタイムゾーンの正しい日付であることを確認
+                const cleanDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+                dayTitle.textContent = `${cleanDate.getMonth() + 1}月${cleanDate.getDate()}日`;
+                timelineContainer.innerHTML = ''; // クリア
+
+                const hoursWrapper = document.createElement('div');
+                hoursWrapper.className = 'timeline-hours';
+                const eventsWrapper = document.createElement('div');
+                eventsWrapper.className = 'timeline-events';
+
+                // 0:00 から 23:00 までの時間マーカーを作成
+                for (let i = 0; i < 24; i++) {
+                    const hourMarker = document.createElement('div');
+                    hourMarker.className = 'hour-marker';
+                    hourMarker.style.height = `${HOUR_HEIGHT_PX}px`;
+                    
+                    const timeLabel = document.createElement('span');
+                    timeLabel.textContent = `${i}:00`;
+                    
+                    hourMarker.appendChild(timeLabel);
+                    hoursWrapper.appendChild(hourMarker);
+                }
+
+                timelineContainer.appendChild(hoursWrapper);
+                
+                // イベントの描画
+                const dayEvents = getEventsForDate(cleanDate); // 時刻情報のない日付で検索
+                dayEvents.forEach(event => {
+                    const eventItem = document.createElement('div');
+                    eventItem.className = 'day-event-item';
+                    eventItem.dataset.color = event.color;
+                    eventItem.dataset.id = event.id;
+
+                    const [startH, startM] = event.startTime.split(':').map(Number);
+                    const [endH, endM] = event.endTime.split(':').map(Number);
+
+                    // (時間 + 分/60) * (60px/時間) ＝ 分単位のピクセル位置
+                    const top = (startH + startM / 60) * HOUR_HEIGHT_PX;
+                    const end = (endH + endM / 60) * HOUR_HEIGHT_PX;
+                    
+                    // 終了位置 - 開始位置 = 分単位の高さ
+                    const height = end - top;
+
+                    eventItem.style.top = `${top}px`;
+                    eventItem.style.height = `${height}px`;
+
+                    eventItem.innerHTML = `
+                        <h4>${event.name}</h4>
+                        <p>${event.startTime}〜${event.endTime}</p>
+                        <button class="delete-event-btn" data-id="${event.id}" data-date="${getISODate(cleanDate)}">&times;</button>
+                    `;
+                    eventsWrapper.appendChild(eventItem);
+                });
+                
+                timelineContainer.appendChild(eventsWrapper);
+                
+                // 削除ボタンにイベントリスナーを追加
+                eventsWrapper.querySelectorAll('.delete-event-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation(); // 親のクリックイベントを発火させない
+                        showDeleteModal(btn.dataset.id, btn.dataset.date);
+                    });
+                });
+
+                // ビュー切り替え
+                monthView.classList.remove('active');
+                dayView.classList.add('active');
+                
+                // 8:00 (8 * 60px) の位置までスクロール
+                timelineContainer.scrollTop = 8 * HOUR_HEIGHT_PX;
+            }
+
+
+            // --- モーダル (ポップアップ) 処理 ---
+
+            /**
+             * 予定登録モーダルを表示
+             * @param {Date} [date] - 日付 (日表示から呼ぶ場合)
+             * @param {boolean} [isFromHome=false] - ホームから呼んだか
+             */
+            function showEventModal(date = null, isFromHome = false) {
+                eventForm.reset();
+                document.getElementById('event-id').value = ''; // 新規登録
+                
+                const datePickerGroup = document.getElementById('date-picker-group');
+                const eventDateInput = document.getElementById('event-date');
+                const eventDateHiddenInput = document.getElementById('event-date-input');
+                
+                const modalDate = date ? new Date(date.getFullYear(), date.getMonth(), date.getDate()) : new Date();
+
+                if (isFromHome) {
+                    // ホームからの場合、日付ピッカーを表示
+                    datePickerGroup.style.display = 'block';
+                    eventDateInput.value = getISODate(modalDate); // 【修正点】ローカル日付を使用
+                    eventDateHiddenInput.value = '';
+                } else {
+                    // 日表示からの場合、日付ピッカーを非表示にし、隠しフィールドに日付をセット
+                    datePickerGroup.style.display = 'none';
+                    eventDateInput.value = '';
+                    eventDateHiddenInput.value = getISODate(modalDate); // 【修正点】ローカル日付を使用
+                }
+                
+                // 色選択の初期化
+                updateColorPickerSelection('cyan'); // デフォルト色
+                
+                eventModal.classList.add('active');
+            }
+
+            /**
+             * 履修登録モーダルを表示
+             */
+            function showCourseModal() {
+                courseForm.reset();
+                document.getElementById('course-faculty').disabled = true;
+                document.getElementById('course-department').disabled = true;
+                document.getElementById('course-list-container').innerHTML = '';
+                
+                const gradeSelect = document.getElementById('course-grade');
+                gradeSelect.innerHTML = '<option value="">選択してください</option>';
+                Object.keys(courseData).forEach(grade => {
+                    gradeSelect.innerHTML += `<option value="${grade}">${grade}</option>`;
+                });
+                
+                courseModal.classList.add('active');
+            }
+
+            /**
+             * 削除確認モーダルを表示
+             * @param {string} eventId
+             * @param {string} isoDate
+             */
+            function showDeleteModal(eventId, isoDate) {
+                const event = events.find(e => e.id === eventId);
+                
+                // イベントが見つからない場合は何もしない
+                if (!event) return;
+
+                deleteEventIdInput.value = eventId;
+                deleteEventDateInput.value = isoDate;
+                
+                // 繰り返しでないイベントの場合は「これ以降」ボタンを非表示
+                if (event.repeat === 'none') {
+                    deleteFollowingBtn.style.display = 'none';
+                    deleteSingleBtn.textContent = 'この予定を削除'; // テキスト変更
+                } else {
+                    deleteFollowingBtn.style.display = 'block';
+                    deleteSingleBtn.textContent = 'この予定のみを削除';
+                }
+                
+                deleteModal.classList.add('active');
+            }
+
+            /**
+             * 全モーダルを閉じる
+             */
+            function closeModal() {
+                eventModal.classList.remove('active');
+                courseModal.classList.remove('active');
+                deleteModal.classList.remove('active');
+            }
+            
+            // モーダルを閉じるイベント
+            document.querySelectorAll('.close-modal, .modal-overlay').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    // .close-modal がクリックされたか、
+                    // または .modal-overlay の外側（背景）がクリックされた場合のみ閉じる
+                    if (e.target.classList.contains('close-modal') || e.target.classList.contains('modal-overlay')) {
+                        closeModal();
+                    }
+                });
+            });
+
+
+            // --- イベント処理ロジック ---
+
+            // 予定登録フォームの送信
+            eventForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                
+                const eventId = document.getElementById('event-id').value;
+                const name = document.getElementById('event-name').value;
+                const startTime = document.getElementById('event-start-time').value;
+                const endTime = document.getElementById('event-end-time').value;
+                const color = selectedColorInput.value;
+                const repeat = document.getElementById('event-repeat').value;
+                
+                // 日付の決定 (ホームからか日表示からか)
+                const dateFromPicker = document.getElementById('event-date').value;
+                const dateFromHidden = document.getElementById('event-date-input').value;
+                const isoDate = dateFromPicker || dateFromHidden;
+                
+                if (!isoDate) {
+                    alert('日付が指定されていません。');
+                    return;
+                }
+                
+                // 終了時間が開始時間より前になっていないかチェック
+                if (endTime <= startTime) {
+                    alert('終了時間は開始時間よりも後に設定してください。');
+                    return;
+                }
+
+                const newEvent = {
+                    id: eventId || `evt-${Date.now()}`,
+                    name: name,
+                    date: isoDate, // 'none' の場合の基準日
+                    startDate: isoDate, // 繰り返しの場合の開始日
+                    startTime: startTime,
+                    endTime: endTime,
+                    color: color,
+                    repeat: repeat,
+                    endDate: null,    // 繰り返し終了日 (「これ以降削除」で使用)
+                    exceptions: [], // 繰り返しからの削除例外日
+                    groupId: eventId || `grp-${Date.now()}` // 繰り返しイベントのグループID (履修登録で使用)
+                };
+                
+                // TODO: ここで eventId がある場合は「編集」のロジックを実装
+                
+                events.push(newEvent);
+                saveEvents();
+                closeModal();
+                
+                // 現在のビューを再描画
+                if (dayView.classList.contains('active')) {
+                    renderDayView(parseISODate(isoDate)); // 【修正点】パースしてDateオブジェクトを渡す
+                } else {
+                    renderMonthView();
+                }
+            });
+
+            // 色選択
+            colorPicker.addEventListener('click', (e) => {
+                if (e.target.classList.contains('color-dot')) {
+                    const color = e.target.dataset.color;
+                    updateColorPickerSelection(color);
+                }
+            });
+            
+            function updateColorPickerSelection(color) {
+                selectedColorInput.value = color;
+                colorPicker.querySelectorAll('.color-dot').forEach(dot => {
+                    dot.classList.toggle('selected', dot.dataset.color === color);
+                });
+            }
+
+            // 履修登録フォームの連携
+            courseForm.addEventListener('change', (e) => {
+                const grade = document.getElementById('course-grade').value;
+                const facultySelect = document.getElementById('course-faculty');
+                const departmentSelect = document.getElementById('course-department');
+                const courseListContainer = document.getElementById('course-list-container');
+                
+                if (e.target.id === 'course-grade' && grade) {
+                    facultySelect.innerHTML = '<option value="">選択してください</option>';
+                    departmentSelect.innerHTML = '<option value="">選択してください</option>';
+                    courseListContainer.innerHTML = '';
+                    
+                    if (courseData[grade]) {
+                        Object.keys(courseData[grade]).forEach(faculty => {
+                            facultySelect.innerHTML += `<option value="${faculty}">${faculty}</option>`;
+                        });
+                    }
+                    facultySelect.disabled = false;
+                    departmentSelect.disabled = true;
+                } 
+                else if (e.target.id === 'course-faculty') {
+                    const faculty = facultySelect.value;
+                    departmentSelect.innerHTML = '<option value="">選択してください</option>';
+                    courseListContainer.innerHTML = '';
+                    
+                    if (faculty && courseData[grade] && courseData[grade][faculty]) {
+                        Object.keys(courseData[grade][faculty]).forEach(department => {
+                            departmentSelect.innerHTML += `<option value="${department}">${department}</option>`;
+                        });
+                        departmentSelect.disabled = false;
+                    } else {
+                        departmentSelect.disabled = true;
+                    }
+                }
+                else if (e.target.id === 'course-department') {
+                    const department = departmentSelect.value;
+                    courseListContainer.innerHTML = '';
+                    
+                    if (department && courseData[grade] && courseData[grade][facultySelect.value] && courseData[grade][facultySelect.value][department]) {
+                        const courses = courseData[grade][facultySelect.value][department];
+                        
+                        // 'あ' データのチェックを、ダミーデータ（2年生 知能メディア工学科以外）の場合のみ適用
+                        const isDummyData = courses.length === 1 && courses[0].name === 'あ' && 
+                                            !(grade === '2年生' && facultySelect.value === '先進工学部' && department === '知能メディア工学科');
+
+                        if (courses.length === 0 || isDummyData || courses[0].name === 'なし') {
+                             courseListContainer.innerHTML = '<p>登録可能な授業はありません。</p>';
+                             return;
+                        } 
+                        
+                        // 授業データをリストアップ
+                        courses.forEach((course, index) => {
+                            courseListContainer.innerHTML += `
+                                <div class="course-item">
+                                    <input type="checkbox" id="course-${index}" value="${index}">
+                                    <label for="course-${index}">${course.day} ${course.start}-${course.end} ${course.name}</label>
+                                </div>
+                            `;
+                        });
+                    }
+                }
+            });
+            
+            // 履修登録フォームの送信
+            courseForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                
+                const grade = document.getElementById('course-grade').value;
+                const faculty = document.getElementById('course-faculty').value;
+                const department = document.getElementById('course-department').value;
+                
+                if (!grade || !faculty || !department) {
+                    alert('学年、学部、学科をすべて選択してください。');
+                    return;
+                }
+                
+                const selectedCoursesIndices = [];
+                courseForm.querySelectorAll('#course-list-container input[type="checkbox"]:checked').forEach(checkbox => {
+                    selectedCoursesIndices.push(checkbox.value);
+                });
+                
+                if (selectedCoursesIndices.length === 0) {
+                    alert('登録する授業を選択してください。');
+                    return;
+                }
+                
+                const allCourses = courseData[grade][faculty][department];
+                const selectedCourses = selectedCoursesIndices.map(index => allCourses[index]);
+
+                // 授業期間（固定）
+                const termStartDate = new Date(2025, 8, 19); // 2025年9月19日 (月は0-11)
+                const termEndDate = new Date(2025, 11, 22); // 2025年12月22日
+                
+                const dayMapping = { '月曜日': 1, '火曜日': 2, '水曜日': 3, '木曜日': 4, '金曜日': 5, '土曜日': 6, '日曜日': 0 };
+                const groupId = `grp-course-${Date.now()}`; // 登録する授業グループID
+
+                selectedCourses.forEach((course, index) => {
+                    const courseDayOfWeek = dayMapping[course.day];
+                    
+                    // 期間内で最初の授業日を見つける
+                    let firstClassDate = new Date(termStartDate.getTime()); // コピーを作成
+                    
+                    // termStartDateの曜日
+                    const startDayOfWeek = firstClassDate.getDay();
+                    
+                    // 目的の曜日までの加算日数を計算
+                    const addDays = (courseDayOfWeek - startDayOfWeek + 7) % 7;
+                    
+                    firstClassDate.setDate(firstClassDate.getDate() + addDays);
+
+                    // 最初の授業日が学期期間内にあるか確認
+                    if (firstClassDate >= termStartDate && firstClassDate <= termEndDate) {
+                        const newCourseEvent = {
+                            id: `course-${Date.now()}-${index}`,
+                            name: course.name,
+                            date: getISODate(firstClassDate), // 【修正点】ローカル日付を使用
+                            startDate: getISODate(firstClassDate), // 【修正点】ローカル日付を使用
+                            startTime: course.start,
+                            endTime: course.end,
+                            color: 'cyan', // 授業は 'cyan' に固定
+                            repeat: 'weekly', // 授業は毎週
+                            endDate: getISODate(termEndDate), // 【修正点】ローカル日付を使用
+                            exceptions: [],
+                            groupId: groupId
+                        };
+                        events.push(newCourseEvent);
+                    }
+                });
+                
+                saveEvents();
+                closeModal();
+                renderMonthView(); // カレンダーを更新
+                alert('履修登録が完了しました。');
+            });
+            
+            
+            // 予定削除：「この予定のみを削除」
+            deleteSingleBtn.addEventListener('click', () => {
+                const eventId = deleteEventIdInput.value;
+                const isoDate = deleteEventDateInput.value;
+                const event = events.find(e => e.id === eventId);
+                
+                if (event) {
+                    if (event.repeat === 'none') {
+                        // 単発イベントはそのまま削除
+                        events = events.filter(e => e.id !== eventId);
+                    } else {
+                        // 繰り返しイベントは、例外日として登録
+                        if (!event.exceptions) {
+                            event.exceptions = [];
+                        }
+                        event.exceptions.push(isoDate);
+                    }
+                    
+                    saveEvents();
+                    closeModal();
+                    renderDayView(parseISODate(isoDate)); // 【修正点】パースしてDateオブジェクトを渡す
+                }
+            });
+
+            // 予定削除：「これ以降の予定を削除」
+            deleteFollowingBtn.addEventListener('click', () => {
+                const eventId = deleteEventIdInput.value;
+                const isoDate = deleteEventDateInput.value;
+                const event = events.find(e => e.id === eventId);
+
+                if (event && event.repeat !== 'none') {
+                    // 削除指定日の前日を計算
+                    const deleteDate = parseISODate(isoDate); // 【修正点】パースしてDateオブジェクトを渡す
+                    const newEndDate = new Date(deleteDate.getTime() - (24 * 60 * 60 * 1000));
+                    
+                    // 繰り返しの終了日を開始日より前に設定することはできない
+                    const startDate = parseISODate(event.startDate); // 【修正点】パースしてDateオブジェクトを渡す
+                    if (newEndDate < startDate) {
+                        // 最初のイベントから削除しようとした場合、イベント自体を削除
+                        events = events.filter(e => e.id !== eventId);
+                    } else {
+                        // 繰り返しの終了日を更新
+                        event.endDate = getISODate(newEndDate); // 【修正点】ローカル日付を使用
+                    }
+
+                    saveEvents();
+                    closeModal();
+                    renderDayView(deleteDate); // 日表示を更新
+                }
+            });
+
+
+            // --- ナビゲーション イベントリスナー ---
+
+            // 前の月へ
+            prevMonthBtn.addEventListener('click', () => {
+                currentDate.setMonth(currentDate.getMonth() - 1);
+                renderMonthView();
+            });
+
+            // 次の月へ
+            nextMonthBtn.addEventListener('click', () => {
+                currentDate.setMonth(currentDate.getMonth() + 1);
+                renderMonthView();
+            });
+
+            // 日表示 -> 月表示へ戻る
+            backToMonthBtn.addEventListener('click', () => {
+                // 日表示で見ていた日付の月を表示する
+                const match = dayTitle.textContent.match(/(\d+)月(\d+)日/);
+                let dayViewDate;
+                if (match) {
+                    const month = parseInt(match[1], 10) - 1; // 月 (0-11)
+                    const day = parseInt(match[2], 10);
+                    // 現在の年を使用 (月が変わる場合も考慮し、currentDateの年を使う)
+                    dayViewDate = new Date(currentDate.getFullYear(), month, day);
+                } else {
+                    dayViewDate = new Date(currentDate.getTime()); // パース失敗時は現在の日付
+                }
+
+                currentDate = dayViewDate;
+                renderMonthView();
+            });
+
+            // ホームから予定追加
+            document.getElementById('add-event-home').addEventListener('click', () => {
+                // 現在表示している月の中日（15日）をデフォルトの日付として渡す
+                const defaultDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 15);
+                showEventModal(defaultDate, true);
+            });
+
+            // 日表示から予定追加
+            document.getElementById('add-event-day').addEventListener('click', () => {
+                const match = dayTitle.textContent.match(/(\d+)月(\d+)日/);
+                let dayViewDate;
+                if (match) {
+                    const month = parseInt(match[1], 10) - 1;
+                    const day = parseInt(match[2], 10);
+                    // 年は currentDate (月表示で最後に見ていた月) の年をそのまま使う
+                    dayViewDate = new Date(currentDate.getFullYear(), month, day);
+                } else {
+                    dayViewDate = new Date(); // フォールバック
+                }
+                showEventModal(dayViewDate, false);
+            });
+            
+            // 履修登録モーダルを開く
+            document.getElementById('open-course-modal').addEventListener('click', showCourseModal);
+
+
+            // --- 初期化 ---
+            renderMonthView();
+
+        });
+    </script>
+</body>
+</html>
